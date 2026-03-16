@@ -1,63 +1,63 @@
-# Live-Github-Data-Pipeline
-
-## Overview
-GitHub Archive Data Lakehouse (2020–2026)
-A high-scale data engineering pipeline built on Databricks Unity Catalog to ingest, process, and analyze over 1TB of GitHub event data.
+# GitHub Activity Pipeline
+A Data Engineering pipeline built on Databricks Delta Live Tables (DLT) and Lakeflow. This pipeline ingests, cleans, and distills half a billion GitHub events into a queryable Star Schema.
 
 ## Architecture
-The project follows a Medallion Architecture using Spark Structured Streaming and Auto Loader to handle massive JSON backfills efficiently.
+The pipeline follows the Medallion Architecture, optimized for high-throughput streaming and automatic schema evolution.
 
-Ingestion (Bronze): Python-based parallel downloader (ThreadPoolExecutor) fetching raw .json.gz files from GH Archive.
+Bronze: Raw JSON ingestion using Auto Loader (cloudFiles).
 
-Storage: Databricks Unity Catalog Volumes for raw landing and Delta Lake for the managed tables.
+Silver (Events): Flattened event logs, filtered for bots, and optimized with Liquid Clustering.
 
-Stream Processing: Auto Loader (cloudFiles) with availableNow triggers for cost-effective, incremental processing.
+Silver (Actors/Repos): Type-1 SCD tables managed via Lakeflow Auto CDC, ensuring unique developer and repository dimensions.
 
-Star schema:
-Event table (Fact Table)
-Actor table (Dimension Table)
-Repo Table (Dimension Table)
+Gold: Materialized Views for Top Engagement Repositories and Top Language Used analytics.
 
+## Performance Milestones
+Ingestion Rate: ~23.4 Million rows/minute.
 
-## Tech Stack
-Language: Python, SQL
+Total Volume: 447,635,830 rows processed in 19m 06s.
 
-Engine: Apache Spark (Databricks Serverless)
+## Features
+Liquid Clustering: Clustered by event_id, type, and created_at for sub-second query performance on massive datasets.
 
-Storage Format: Delta Lake (with Liquid Clustering)
+Bot Filtering: Built-in Regex filters to remove automated/bot GitHub activity.
 
-Orchestration: Databricks Workflows
+Data Quality: DLT Expectations ensure NULL IDs or malformed events never reach the Silver layer.
 
-##  Key Optimizations
-1. High-Performance Ingestion
-To handle the 1TB backfill, I implemented a parallelized downloader that handles GH Archive's specific URL formatting quirks (non-padded integers for hours/months).
+Auto CDC: Uses the 2026 Lakeflow API (create_auto_cdc_flow) for efficient state management of dimension tables.
 
-Optimization: Used ThreadPoolExecutor to download multiple hours simultaneously, reducing backfill time by 80%.
+## Project Structure
+Plaintext
+├── 1. bronze
+│   └── Hourly Data Ingestion.py      
+├── 2. silver
+│   ├── actors       
+│   │   ├── Clean Actors Data.py      
+│   ├── events       
+│   │   ├── Clean Events Data.py
+│   ├── repos       
+│   │   ├── Clean Repos Data.py
+└── 3. gold
+    └── Most Engagement Repos.py
+    └── Most Used Programming Language.py
+## Getting Started
+Add Source: Mount the bronze layer to your GitHub Archive S3 path.
 
-Folder Structure: Organized raw data into /YYYY/MM/ subdirectories to prevent directory listing bottlenecks.
+Configure S3: Ensure your bucket permissions are set for Unity Catalog as well as IAM roles. 
+Links: https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/add-data-external-locations
 
-2. Auto Loader & Schema Evolution
-Used Spark's cloudFiles to handle the semi-structured nature of GitHub events.
+Create Pipeline: Create a new DLT pipeline in Databricks Jobs and Pipeline.
 
-Schema Inference: Enabled mergeSchema to automatically adapt the Delta table when GitHub adds new event types or fields.
+Run: Select Full Refresh to perform the initial row ingestion.
 
-Checkpointing: Implemented robust checkpointing to ensure "exactly-once" processing, allowing the pipeline to resume safely after any failure.
-
-3. Delta Lake Performance at Scale
-Processing 6 years of data (1TB+) requires advanced table management:
-
-Liquid Clustering: Used CLUSTER BY (created_at) instead of traditional partitioning to ensure fast lookups across the entire time range.
-
-Compaction: Enabled autoCompact and optimizeWrite to prevent the "Small File Problem" common with hourly data ingestion.
-
-## Challenges Overcome
-404 Handling: Managed the 2-hour delay in GH Archive availability by implementing retry logic and time-offset calculations.
-
-Data Consistency: Used Delta Lake RESTORE and VACUUM features to maintain data integrity during the experimental phase of the backfill.
-
-## How to Run
-Configure your Unity Catalog Volume path. As well as S3
-
-Run the Parallel Downloader notebook to fetch historical data.
-
-Execute the Auto Loader stream to move data from Bronze to Managed Delta tables.
+## Sample Insight Query
+SQL
+-- Find the fastest growing languages
+SELECT 
+    language, 
+    count(*) as total_events 
+FROM workspace.silver_events 
+WHERE type = 'PushEvent'
+GROUP BY 1 
+ORDER BY 2 DESC 
+LIMIT 10;
