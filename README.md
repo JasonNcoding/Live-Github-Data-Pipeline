@@ -24,22 +24,23 @@ Bot Filtering: Built-in Regex filters to remove automated/bot GitHub activity.
 
 Data Quality: DLT Expectations ensure NULL IDs or malformed events never reach the Silver layer.
 
-Auto CDC: Uses the 2026 Lakeflow API (create_auto_cdc_flow) for efficient state management of dimension tables.
-
 ## Project Structure
-Plaintext
+```text
+.
 ├── 1. bronze
-│   └── Hourly Data Ingestion.py      
+│   └── Hourly Data Ingestion.py
 ├── 2. silver
-│   ├── actors       
-│   │   ├── Clean Actors Data.py      
-│   ├── events       
-│   │   ├── Clean Events Data.py
-│   ├── repos       
-│   │   ├── Clean Repos Data.py
+│   ├── actors
+│   │   └── Clean Actors Data.py
+│   ├── events
+│   │   └── Clean Events Data.py
+│   └── repos
+│       └── Clean Repos Data.py
 └── 3. gold
-    └── Most Engagement Repos.py
+    ├── Most Engagement Repos.py
     └── Most Used Programming Language.py
+```
+
 ## Getting Started
 Add Source: Mount the bronze layer to your GitHub Archive S3 path.
 
@@ -50,7 +51,9 @@ Create Pipeline: Create a new DLT pipeline in Databricks Jobs and Pipeline.
 
 Run: Select Full Refresh to perform the initial row ingestion.
 
-## Sample Insight Query
+## Sample Insight Query 
+
+```
 SQL
 -- Find the fastest growing languages
 SELECT 
@@ -58,6 +61,22 @@ SELECT
     count(*) as total_events 
 FROM workspace.silver_events 
 WHERE type = 'PushEvent'
-GROUP BY 1 
-ORDER BY 2 DESC 
+GROUP BY language
+ORDER BY total_events DESC 
 LIMIT 10;
+```
+
+## Strategy for testing
+
+1. Testing Schema Evolution
+
+Add a sample data contain either of actor,repo which has different schema in the database.
+
+2. Testing Query Speed
+
+Add multiple sample data of 10gb to track speed of the query which could be used to optimised later
+
+## Source
+Data Source: https://www.gharchive.org/
+
+Learning Material: https://docs.databricks.com/aws/en/getting-started/data-pipeline-get-started
