@@ -1,30 +1,58 @@
 # GitHub Activity Pipeline
-A Data Engineering pipeline built on Databricks Delta Live Tables (DLT) and Lakeflow. This pipeline ingests, cleans, and distills half a billion GitHub events into a queryable Star Schema.
+
+![Python](https://img.shields.io/badge/Python-3.10-blue)
+![Databricks](https://img.shields.io/badge/Databricks-DLT%20%2B%20Lakeflow-orange)
+![Delta Lake](https://img.shields.io/badge/Delta%20Lake-Liquid%20Clustering-green)
+![AWS S3](https://img.shields.io/badge/AWS-S3-yellow)
+
+A data engineering pipeline built on Databricks Delta Live Tables (DLT) and Lakeflow that ingests, cleans, and distills **half a billion GitHub events** into a queryable star schema.
+
+## Overview & Motivation
+
+Public GitHub activity is published continuously as raw event logs — high-volume, messy, and full of bot noise. This project builds a production-style lakehouse pipeline against that real-world stream, rather than a cleaned tutorial dataset, to get hands-on with the problems that actually show up at scale: schema evolution, deduplication, streaming ingestion throughput, and enforcing data quality before bad records reach analytics.
+
+The result is a star schema — deduplicated actor and repo dimensions joined to a cleaned events fact table — ready for direct analytical querying.
 
 ## Architecture
-The pipeline follows the Medallion Architecture, optimized for high-throughput streaming and automatic schema evolution.
 
-Bronze: Raw JSON ingestion using Auto Loader (cloudFiles).
+Medallion architecture, optimized for high-throughput streaming and automatic schema evolution:
 
-Silver (Events): Flattened event logs, filtered for bots, and optimized with Liquid Clustering.
+```mermaid
+flowchart LR
+    A[GH Archive JSON] -->|Auto Loader / cloudFiles| B(Bronze Raw events)
+    B --> C(Silver: Events)
+    B --> D(Silver: Actors)
+    B --> E(Silver: Repos)
+    C --> F(Gold Materialized Views)
+    D --> F
+    E --> F
+    F --> G[Top Engagement Repos]
+    F --> H[Top Language Used]
+```
 
-Silver (Actors/Repos): Type-1 SCD tables managed via Lakeflow Auto CDC, ensuring unique developer and repository dimensions.
+- **Bronze** — Raw JSON ingestion using Auto Loader (`cloudFiles`)
+- **Silver (Events)** — Flattened event logs, filtered for bots, and optimized with Liquid Clustering
+- **Silver (Actors/Repos)** — Keeping developer and repository dimensions unique and current
+- **Gold** — Materialized Views for Top Engagement Repositories and Top Language Used analytics
 
-Gold: Materialized Views for Top Engagement Repositories and Top Language Used analytics.
+## Tech Stack & Rationale
 
-## Performance Milestones
-Ingestion Rate: ~23.4 Million rows/minute.
+| Component | Why |
+|---|---|
+| **Databricks DLT + Lakeflow** | Declarative pipeline definitions with built-in data quality expectations and managed orchestration |
+| **Auto Loader (`cloudFiles`)** | Incrementally and efficiently ingests new files as they land, without reprocessing the full history each run |
+| **Liquid Clustering** | Clustered by `event_id`, `type`, and `created_at` for sub-second query performance at this row count, without the maintenance overhead of static partitioning |
+| **DLT Expectations** | Enforced at the Silver boundary so NULL IDs or malformed events never reach downstream tables |
+| **AWS S3** | Durable, low-cost storage backing the lakehouse |
 
-Total Volume: 447,635,830 rows processed in 19m 06s.
+## Performance & Results
 
-## Features
-Liquid Clustering: Clustered by event_id, type, and created_at for sub-second query performance on massive datasets.
-
-Bot Filtering: Built-in Regex filters to remove automated/bot GitHub activity.
-
-Data Quality: DLT Expectations ensure NULL IDs or malformed events never reach the Silver layer.
+- **447,635,830 rows** processed end-to-end
+- **19m 06s** total runtime — an ingestion rate of **~23.4 million rows/minute**
+- Sub-second query performance on the Silver events table via Liquid Clustering
 
 ## Project Structure
+
 ```text
 .
 ├── 1. bronze
@@ -42,41 +70,46 @@ Data Quality: DLT Expectations ensure NULL IDs or malformed events never reach t
 ```
 
 ## Getting Started
-Add Source: Mount the bronze layer to your GitHub Archive S3 path.
 
-Configure S3: Ensure your bucket permissions are set for Unity Catalog as well as IAM roles. 
-Links: https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/add-data-external-locations
+1. **Add source** — mount the Bronze layer to your GitHub Archive S3 path.
+2. **Configure S3** — ensure bucket permissions are set for both Unity Catalog and the relevant IAM roles. See [Databricks: add data from external locations](https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/add-data-external-locations).
+3. **Create pipeline** — create a new DLT pipeline under Databricks Jobs & Pipelines.
+4. **Run** — select **Full Refresh** for the initial full ingestion.
 
-Create Pipeline: Create a new DLT pipeline in Databricks Jobs and Pipeline.
+## Sample Insight Query
 
-Run: Select Full Refresh to perform the initial row ingestion.
-
-## Sample Insight Query 
-
-```
-SQL
+```sql
 -- Find the fastest growing languages
-SELECT 
-    language, 
-    count(*) as total_events 
-FROM workspace.silver_events 
+SELECT
+    language,
+    count(*) as total_events
+FROM workspace.silver_events
 WHERE type = 'PushEvent'
 GROUP BY language
-ORDER BY total_events DESC 
+ORDER BY total_events DESC
 LIMIT 10;
 ```
 
-## Strategy for testing
+## Data Quality & Testing Strategy
 
-1. Testing Schema Evolution
+1. **Schema evolution** — introduce sample actor/repo records with a divergent schema to confirm the pipeline adapts without breaking downstream tables.
+2. **Query speed at scale** — load additional 10GB sample batches to benchmark query performance and identify where further optimization (clustering, partitioning, caching) pays off.
 
-Add a sample data contain either of actor,repo which has different schema in the database.
+## Challenges & What I Learned
 
-2. Testing Query Speed
+Deciding which SCD type the pipeline should follow. I ended up using both:
+- Type 1 (overwrite) for data where only the latest state matters, such as routine updates.
+- Type 2 (append new rows) for data where historical records are needed for analysis.
 
-Add multiple sample data of 10gb to track speed of the query which could be used to optimised later
+Deciding between a fixed schema and a schemaless approach for schema evolution. Going schemaless lowers storage and maintenance costs, but trades off query speed — which in turn drives up compute cost. To balance this, the pipeline enforces schema on top of S3-backed storage, keeping storage costs down while still getting the query performance needed.
 
-## Source
-Data Source: https://www.gharchive.org/
+## Future Improvements
 
-Learning Material: https://docs.databricks.com/aws/en/getting-started/data-pipeline-get-started
+- Move from hourly batch to near-real-time streaming ingestion
+- Consider other tools such as dbt, Prefect, Airflow, etc if they have significant advantages. 
+- Expand the Gold layer with additional analytics (e.g. contributor growth over time, language trend lines)
+
+## Source & Learning Material
+
+- Data source: [GH Archive](https://www.gharchive.org/)
+- Reference: [Databricks: Get started with data pipelines](https://docs.databricks.com/aws/en/getting-started/data-pipeline-get-started)
