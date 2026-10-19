@@ -19,5 +19,5 @@ dlt.create_auto_cdc_flow(
     source="extract_actors",
     keys=["id"], 
     sequence_by=F.col("created_at"),
-    stored_as_scd_type=1
+    stored_as_scd_type=2
 )
