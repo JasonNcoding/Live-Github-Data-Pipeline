@@ -97,7 +97,7 @@ LIMIT 10;
 
 ## Challenges & What I Learned
 
-Deciding which SCD type the pipeline should follow. I ended up using both:
+Deciding which SCD type the pipeline should follow. I use Type 2 over Type 1
 - Type 1 (overwrite) for data where only the latest state matters, such as routine updates.
 - Type 2 (append new rows) for data where historical records are needed for analysis.
 
